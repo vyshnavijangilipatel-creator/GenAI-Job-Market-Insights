@@ -1,0 +1,289 @@
+{
+  "name": "Linkedin Job Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ff36fd51-cb40-4d2f-a4c7-76f99362a0a1",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ceb3598f-9034-4f5f-8453-4cffb0c8317e",
+              "name": "resume_text",
+              "value": "YOUR_RESUME_TEXT",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ],
+      "id": "af82c731-fc45-4fbd-84c7-355f60475707",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "9FJAkbqgbJTRwSPiB",
+          "mode": "list",
+          "cachedResultName": "Linkedin Jobs Scraper Ppr (silentflow/linkedin-jobs-scraper-ppr)",
+          "cachedResultUrl": "https://console.apify.com/actors/9FJAkbqgbJTRwSPiB/input"
+        },
+        "customBody": "{\n  \"titles\": [\n    \"Python Developer\",\n    \"Data Scientist\",\n    \"Gen AI\"\n  ],\n  \"locations\": [\n    \"Hyderabad\"\n  ],\n  \"maxItems\": 5,\n  \"easyApply\": false,\n  \"publishedAt\": \"r604800\"\n}\n  ",
+        "timeout": "=300"
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "d8bfc48d-7e8d-4d09-8490-26d560c44bf1",
+      "name": "Run an Actor and get dataset",
+      "alwaysOutputData": true,
+      "credentials": {
+        "apifyApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR_APIFY_API_TOKEN"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        672,
+        0
+      ],
+      "id": "a841f6fa-73a0-4c5b-9a8c-adb0b4b5d4eb",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.1-flash-lite",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.1-flash-lite"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze the incoming job description data from our scraper. Extract the following details clearly:\n1. Company Name\n2. Key Skills Required\n3. Location\n4. Brief 2-sentence summary of the job responsibilities\n\nHere is the data:"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "4b6fc281-5d56-420b-94a9-668e67d580f8",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR_GEMINI_API_KEY"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// This array will store our final structured outputs\nconst results = [];\n\n// 1. Loop through all incoming items safely using n8n's standard collection syntax\nfor (const item of $input.all()) {\n  \n  // 2. Safely capture the data from the Gemini node output fields\n  // Try extracting standard message model payload outputs (text, content, or general output)\n  let content = item.json.text || item.json.content || item.json.output || \"\";\n  \n  // 3. Defensive Check: If content is an object or array instead of a string, stringify it\n  if (typeof content !== 'string') {\n    content = JSON.stringify(content);\n  }\n\n  // 4. Safely trim trailing/leading spaces\n  let jsonStr = content.trim();\n\n  // 5. Clean off Markdown wrappers (like ```json ... ```) if Gemini includes them\n  if (jsonStr.startsWith('```json')) {\n    jsonStr = jsonStr.substring(7, jsonStr.length).trim();\n  } else if (jsonStr.startsWith('```')) {\n    jsonStr = jsonStr.substring(3, jsonStr.length).trim();\n  }\n  \n  if (jsonStr.endsWith('```')) {\n    jsonStr = jsonStr.substring(0, jsonStr.length - 3).trim();\n  }\n\n  // 6. Regex extract fallback: Isolate only the true JSON curly block {} inside text string\n  const jsonMatch = jsonStr.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    jsonStr = jsonMatch[0];\n  }\n\n  // 7. Safe JSON Parsing Block\n  let parsed;\n  try {\n    // If the string is completely empty, provide an empty fallback object to avoid parsing crash\n    parsed = jsonStr ? JSON.parse(jsonStr) : {};\n  } catch (e) {\n    // If parsing fails, don't crash the workflow. Log the raw data into an error property.\n    results.push({ \n      json: { \n        error: 'Failed to parse JSON string securely', \n        raw_content: content \n      } \n    });\n    continue;\n  }\n\n  // 8. Output generation: Add structured values downstream to tables or sheets\n  results.push({\n    json: {\n      companyName: parsed.companyName || parsed[\"Company Name\"] || \"Not Specified\",\n      skillsRequired: parsed.skillsRequired || parsed[\"Key Skills Required\"] || parsed[\"skills\"] || \"Not Specified\",\n      location: parsed.location || parsed[\"Location\"] || \"Hyderabad\",\n      summary: parsed.summary || parsed[\"Brief 2-sentence summary of the job responsibilities\"] || \"No summary provided\"\n    }\n  });\n}\n\n// Return the cleaned list of items to n8n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        0
+      ],
+      "id": "ffd0cb2f-a2d1-418d-9465-eecdc5e86408",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "79eac29c-cb0e-4f6b-af42-196abd69c518",
+              "leftValue": "={{ $json.skillsRequired }}",
+              "rightValue": "={{ $json.summary }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        0
+      ],
+      "id": "a2ad9ad9-f889-4bbd-8ed6-045d7b46f4a7",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an expert at rewriting resumes based on Job Descriptions. You will be provided with the candidate's skills, job description, and candidate resume. You should prepare a resume for the candidate that is optimized for the particular job description.\n\n**IMPORTANT INSTRUCTIONS:**\n- The resume you prepare will be sent directly to the client. So do not add any notes and or sections which require information to be updated by the candidate.\n\n**Job Description:**\n{{ $json.summary }}\n\n**Candidate Resume:**\n[YOUR_RESUME_TEXT]\n\nThe resume will be added to Google Docs, so provide the output in Markdown format. Put the markdown resume content in a JSON item called \"resume\".\nReturn only the clean, professional resume without any AI-generated filler text, placeholder sections, or explanatory notes."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1648,
+        0
+      ],
+      "id": "db9012f9-d5e3-4c89-aa77-5981625a4b90",
+      "name": "Message a model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "YOUR_GEMINI_API_KEY"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Run an Actor and get dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run an Actor and get dataset": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ad17ca6f-f5b2-4d79-9130-d51f581c677b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": ""
+  },
+  "id": "sg4ttBbLlSu3lRNf",
+  "tags": []
+}
